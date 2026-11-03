@@ -9,15 +9,17 @@ This document covers the structure and rules for the Functional Core layer.
 The core contains all pure domain logic. It has no side effects, no framework imports, and
 no IO. Everything in the core is deterministic: same input always produces same output.
 
-A core module is organized into five directories, ordered from lowest to highest strata.
+The core lives in `core` packages, organized into modules. See
+[architecture-repository.md](./architecture-repository.md) for how packages are laid out.
+
+A core module is organized into four directories, ordered from lowest to highest strata.
 Dependencies only flow upward. A lower stratum never depends on a higher one.
 
 ```
 /module-name
-  /polyfills
   /extensions
   /units
-  /data-gateways
+  /contracts
   /use-cases
 ```
 
@@ -25,201 +27,49 @@ Dependencies only flow upward. A lower stratum never depends on a higher one.
 
 ## Polyfills
 
-Polyfills fill gaps in TypeScript's type system or standard library. Examples include
-validation schemas, `Option<T>`, `Result<T, E>`, and discriminated union constructors.
-
-These are temporary by nature. Once a library covers the need (`gado` for `Option`/`Result`,
-`yamin` for unions, `zod` for validation schemas), the polyfill is replaced by the library.
-The rest of the codebase does not need to change since the interface stays the same.
+Polyfills such as `Option<T>` and `Result<T, E>` do not live in core modules. They live in
+`polyfill` packages, which the core can import. See
+[architecture-repository.md](./architecture-repository.md#polyfill).
 
 ---
 
 ## Extensions
 
-Extensions add operators to existing language or stdlib types without modifying them. An
-extension treats a language type as its unit and adds constructors, selectors, and
-transformers around it.
+Extensions add operators to a unit the module does not own. In the core, that is a language
+or stdlib type, a polyfill or library type, or a unit from `common`. See
+[architecture-unit.md](./architecture-unit.md#extensions) for the full rules.
 
 ```
 /extensions
   /array
     index.ts
-    array.ts    # Array<T> as the unit
+    array.ext.ts    # extends Array<T>
 ```
-
-Too many extensions on the same type is a signal that a new domain unit should be
-introduced instead.
 
 ---
 
 ## Units
 
-A unit is a single exported type and all the operators that work on it. Units are the primary
-building block of the core.
+Units are the primary building block of the core. They follow all the rules in
+[architecture-unit.md](./architecture-unit.md).
 
-### One unit per file
+Core units must be pure and immutable without exception. Unlike shell units, they never
+deviate from this rule.
 
-Each file exports exactly one unit. The filename matches the exported type name in
-kebab-case. Never put multiple exported units in one file.
-
-```
-/units
-  /user
-    index.ts
-    user.ts           # User type
-    user-error.ts     # UserError type
-```
-
-### Immutability
-
-All domain objects are immutable. No field is ever mutated after construction. Transformers
-always return a new instance.
-
-### Non-anemic domain
-
-Functions that operate on a type live next to it, in the same file. There are no `utils/`,
-`helpers/`, or floating functions. Every function belongs to a domain concept.
-
-### Block structure
-
-Every unit file follows this block structure:
-
-```ts
-// --- Unit ---
-
-type User = {
-  id: UserId
-  email: Email
-  name: string
-}
-
-// --- Private ---
-
-const isValidName = (name: string): boolean => name.trim().length > 0
-
-// --- Constructors ---
-
-export const createUser = (params: CreateUserParams): Result<User, UserError> => ...
-
-// --- Selectors ---
-
-export const getFullName = (user: User): string => ...
-export const isEligible = (user: User): boolean => ...
-
-// --- Transformers ---
-
-export const updateEmail = (user: User, email: Email): Result<User, UserError> => ...
-```
-
-Constructors create or produce the unit, optionally wrapped in `Result` or `Option`.
-
-Selectors accept the unit and return a derived value. They never return the unit itself.
-
-Transformers accept the unit and return the unit or a wrapped unit. They never return a
-derived value.
-
-This follows CQS: a function either queries or commands, never both.
-
-### Private block
-
-Private items are non-exported helpers that support the unit's operators. Having too many
-private items is a signal that a new unit should be extracted.
-
-Other indicators for extracting a new unit:
-- An operator's implementation becomes too long
-- A field inside the unit is frequently operated on independently
-
-### Representation
-
-Choose the representation in this order:
-
-1. `type` is the default and should be used for most domain objects
-2. Discriminated union when the domain concept has multiple variants
-3. `class` only when member hiding, polymorphism, or method chaining API is needed
-4. Schema (e.g. Zod) when validation at the boundary is needed and the type is inferred from it
-
-### Make invalid state impossible
-
-Types should encode constraints so that invalid states cannot be represented. If the type
-system cannot express the constraint, a constructor function enforces it at runtime.
-
-Use discriminated unions instead of boolean flags:
-
-```ts
-// ✅ DO
-type UserStatus =
-  | { kind: 'active' }
-  | { kind: 'suspended'; reason: string }
-
-// ❌ DON'T
-type UserStatus = {
-  isActive: boolean
-  isSuspended: boolean
-  suspensionReason?: string  // only meaningful when isSuspended is true
-}
-```
-
-Use branded types for primitives that should not be interchangeable:
-
-```ts
-// ✅ DO
-type UserId = string & { readonly __brand: 'UserId' }
-type Email = string & { readonly __brand: 'Email' }
-
-const findUser = (id: UserId): Option<User> => ...
-```
-
-Use constructor functions that return `Result` or `Option` instead of throwing:
-
-```ts
-// ✅ DO
-export const createEmail = (value: string): Result<Email, EmailError> => {
-  if (!EMAIL_REGEX.test(value)) return Result.err({ kind: 'invalidFormat' })
-  return Result.ok(value as Email)
-}
-
-// ❌ DON'T
-export const createEmail = (value: string): Email => {
-  if (!EMAIL_REGEX.test(value)) throw new Error('Invalid email')
-  return value as Email
-}
-```
-
-### Avoid exceptions
-
-Do not use exceptions for control flow or expected error cases. Use `Option` and `Result`
-instead.
-
-`Option<T>` is for values that may be absent. `Result<T, E>` is for operations that can
-fail with a meaningful error. `Promise<Option<T>>` or `Promise<Result<T, E>>` covers the
-async variants.
-
-Throwing is reserved for truly unexpected, unrecoverable situations.
-
-### No side effects
-
-Unit operators must be pure functions. No IO, no mutation, no randomness, no global state.
-`Promise` is allowed since it represents an async value, not a side effect itself.
-
-### Stratified design
-
-Units form a stratified design. Lower strata are closer to the language, such as primitive
-value objects like `Email`, `UserId`, and `Money`. Higher strata compose from lower ones,
-for example `User` uses `Email` and `UserId`, and `Order` uses `User` and `Money`.
-
-A unit at a lower stratum never depends on a unit at a higher stratum.
+Because of that, unit tests in the core should ideally reach 100% coverage without any
+mocks. See [testing.md](./testing.md).
 
 ---
 
-## Data gateways
+## Contracts
 
-A data gateway is a function type that describes what data the domain needs from the outside
+A contract is a function type that describes what data the domain needs from the outside
 world, without specifying how it is fetched. The shell provides the implementation.
 
-Data gateways depend on units but not on use cases.
+Contracts depend on units but not on use cases.
 
 ```
-/data-gateways
+/contracts
   /find-user-by-id
     index.ts
     find-user-by-id.ts           # FindUserById function type
@@ -230,7 +80,7 @@ Data gateways depend on units but not on use cases.
 ```ts
 // --- Unit ---
 
-type FindUserById = (request: FindUserByIdRequest) => Promise<Option<FindUserByIdResponse>>
+export type FindUserById = (request: FindUserByIdRequest) => Promise<Option<FindUserByIdResponse>>
 ```
 
 No constructor, no deps. Just the contract. The shell wires the actual implementation.
@@ -240,12 +90,12 @@ No constructor, no deps. Just the contract. The shell wires the actual implement
 ## Use cases
 
 A use case is a function type representing a specific operation the shell wants to perform.
-Use cases are the primary entry point for the shell to interact with the core. The shell never
-calls unit operators directly. It always goes through a use case.
+Use cases are the entry point for any operation that needs the outside world. The shell
+may still call unit operators directly, since they are pure and immutable.
 
-Use cases orchestrate units and data gateways to fulfill their operation. They depend on
-units, data gateway types, and other use case types, but never on their implementations.
-Composition of implementations is the shell's responsibility.
+Use cases orchestrate units and contracts to fulfill their operation. They depend on units,
+contract types, and other use case types, but never on their implementations. Composition
+of implementations is the shell's responsibility.
 
 ```
 /use-cases
@@ -260,7 +110,7 @@ Composition of implementations is the shell's responsibility.
 ```ts
 // --- Unit ---
 
-type SendWelcomeEmail = (request: SendWelcomeEmailRequest) => Promise<Result<SendWelcomeEmailResponse, SendWelcomeEmailError>>
+export type SendWelcomeEmail = (request: SendWelcomeEmailRequest) => Promise<Result<SendWelcomeEmailResponse, SendWelcomeEmailError>>
 
 // --- Constructors ---
 
@@ -279,11 +129,11 @@ via the deps type, making them composable. The shell wires the actual implementa
 
 From lowest to highest:
 
-1. Polyfills have no dependencies on other core concepts
-2. Extensions depend on polyfills only
-3. Units depend on polyfills, extensions, and other units at lower or equal strata
-4. Data gateways depend on units
-5. Use cases depend on units, data gateway types, and other use case types
+1. Extensions depend on polyfill packages and the unit they extend
+2. Units depend on polyfill packages, extensions, `common`, and other units at lower or
+   equal strata
+3. Contracts depend on units
+4. Use cases depend on units, contract types, and other use case types
 
 The shell depends on all of the above. Nothing in the core depends on the shell.
 
@@ -293,8 +143,7 @@ The shell depends on all of the above. Nothing in the core depends on the shell.
 
 | Concept | Purpose | Depends On |
 |---|---|---|
-| Polyfills | Fill TS/stdlib gaps, replaced by libraries | Nothing |
-| Extensions | Add operators to language types | Polyfills |
-| Units | Domain objects and their operators | Polyfills, extensions, lower units |
-| Data gateways | Contracts for fetching external data | Units |
-| Use cases | Entry points for shell operations | Units, gateway types, other use case types |
+| Extensions | Add operators to a unit the module does not own | Polyfill packages, the extended unit |
+| Units | Domain objects and their operators | Polyfill packages, extensions, `common`, lower units |
+| Contracts | Function types for fetching external data | Units |
+| Use cases | Entry points for shell operations | Units, contract types, other use case types |

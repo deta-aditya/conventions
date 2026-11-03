@@ -231,6 +231,91 @@ type Section =
 
 ---
 
+## Use cases and contracts: verb and object
+
+Use cases and contracts are named as a verb followed by an object, such as `placeOrder` or
+`findUserById`. The type uses `PascalCase`, the implementation value uses `camelCase`, and
+the constructor adds a `create` prefix.
+
+```ts
+type FindUserById = (request: FindUserByIdRequest) => Promise<Option<FindUserByIdResponse>>
+
+const findUserById = createFindUserById(deps)
+```
+
+### Contracts
+
+A contract is named after the operation it performs on the outside world, such as
+`findUserById`, `saveOrder`, or `sendEmail`. Any verb that describes the operation clearly
+is fine.
+
+### Use cases
+
+A use case is named after the business operation, as the user or the domain would describe
+it, not after the data it touches.
+
+- Prefer a domain verb over a generic one: `placeOrder` over `createOrder` or `saveOrder`,
+  `changeShippingAddress` over `updateOrder`.
+- Queries may use `get` or `list`: `getUserProfile`, `listOrderHistory`.
+- Do not name a use case after a contract it calls. A use case named `findUserById` is a
+  sign it only forwards the contract.
+
+```ts
+// ✅ DO
+
+type PlaceOrder = ...
+type CancelSubscription = ...
+type SendWelcomeEmail = ...
+type GetUserProfile = ...
+
+// ❌ DON'T
+
+type CreateOrder = ...     // generic, the domain says "place"
+type UpdateOrder = ...     // which change? say what it is
+type SaveUser = ...        // a data operation, belongs to a contract
+type HandleCheckout = ...  // "handle" says nothing about the operation
+```
+
+---
+
+## Files: `kebab-case`
+
+File and directory names are written in `kebab-case`. A file is named after the type or
+framework unit it exports, so `UserError` lives in `user-error.ts` and `useLoginEffect`
+lives in `use-login-effect.ts`. Files that contain JSX use `.tsx`.
+
+A file name has two kinds of suffix:
+
+- A **hyphen suffix** is part of the name. It names a separate thing that belongs to the
+  same concept, such as the deps type of a use case.
+- A **dot suffix** describes the role of the file, such as an extension, an implementation
+  for a given technology, or a test. Dot suffixes come after the name and before the file
+  extension, with `.test` last.
+
+| Pattern | Holds | Example |
+|---|---|---|
+| `{unit-name}.ts` | A unit | `user.ts` |
+| `{name}-deps.ts` | The deps type of a use case or contract implementation | `send-welcome-email-deps.ts` |
+| `{name}-request.ts` | The request type of a use case or contract | `find-user-by-id-request.ts` |
+| `{name}-response.ts` | The response type of a use case or contract | `find-user-by-id-response.ts` |
+| `{unit-name}.ext.ts` | An extension of a unit the scope does not own | `array.ext.ts` |
+| `{contract-name}.{tech}.ts` | A contract implementation for one technology | `find-user-by-id.http.ts` |
+| `{name}-deps.{tech}.ts` | The deps type of a contract implementation | `find-user-by-id-deps.http.ts` |
+| `{module-name}-contracts.ts` | All contract implementations of a module | `auth-contracts.ts` |
+| `{module-name}-use-cases.ts` | All use cases of a module | `auth-use-cases.ts` |
+| `{module-name}-routes.ts` | The routes of a module | `auth-routes.ts` |
+| `{name}-store.ts` | A store | `login-store.ts` |
+| `{component-name}-styles.ts` | The styles of a component | `text-input-styles.ts` |
+| `use-{name}.ts` | A hook | `use-login-effect.ts` |
+| `{name}-handler.ts` | A server request handler | `place-order-handler.ts` |
+| `{name}-middleware.ts` | A server middleware | `authentication-middleware.ts` |
+| `{name}-dto.ts` | A DTO schema unit | `place-order-request-dto.ts` |
+| `{file-name}.test.ts` | Tests for the file of the same name | `find-user-by-id.http.test.ts` |
+| `{unit-name}.fixture.ts` | Test fixtures shared across test files | `user.fixture.ts` |
+| `index.ts` | The entry point of a directory, re-exporting its public parts | `index.ts` |
+
+---
+
 ## Edge cases
 
 These rules may be broken at the **edge of the codebase** where a third party requires it.
@@ -255,3 +340,6 @@ names. Once data crosses that boundary inward, the rules apply normally.
 | Type parameters | Single letter (`T`, `U`, `V`, ...) |
 | Booleans | Reads as yes/no question (`is`, `has`, `can`, ...) |
 | Union variant `kind` field | `camelCase` |
+| Contracts | Verb and object, named after the operation on the outside world |
+| Use cases | Domain verb and object, named after the business operation |
+| Files and directories | `kebab-case`, hyphen suffix for a related thing, dot suffix for a role |

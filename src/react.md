@@ -136,30 +136,43 @@ const SomeComponent = () => {
 
 ---
 
-## Use React Context for dependency injection
+## Keep infrastructure out of React
 
-External dependencies such as API clients, services, and third-party integrations should be
-injected via React Context rather than imported directly inside components or hooks. This
-keeps components decoupled from infrastructure and makes them easier to test.
+Infrastructure such as API clients, storage, and third-party SDKs is built at
+initialization, outside React. It reaches React code only through use cases, which are
+injected via React Context. This keeps components decoupled from infrastructure and makes
+them easier to test.
+
+Only when an infrastructure item absolutely has to enter React, for example a third-party
+SDK whose React bindings need the instance, wrap it in a context first. Expose it through a
+provider and a usage hook like any other context. Never import it directly inside
+components or hooks.
 
 ```tsx
 // ✅ DO
 
-type ApiClientContextValue = {
-  apiClient: ApiClient
+// Infrastructure stays outside React. Only use cases are injected.
+const useLoginEffect = () => {
+  const { login } = useAuthUseCase()
+  // ...
 }
 
-const ApiClientContext = createContext<ApiClientContextValue | null>(null)
+// ✅ DO
 
-export const ApiClientProvider = ({ client, children }: PropsWithChildren<{ client: ApiClient }>) => (
-  <ApiClientContext.Provider value={{ apiClient: client }}>
+// Only when infrastructure absolutely has to enter React, wrap it in a context first
+const AnalyticsContext = createContext<AnalyticsClient | null>(null)
+
+type AnalyticsProviderProps = PropsWithChildren<{ client: AnalyticsClient }>
+
+export const AnalyticsProvider = ({ client, children }: AnalyticsProviderProps) => (
+  <AnalyticsContext.Provider value={client}>
     {children}
-  </ApiClientContext.Provider>
+  </AnalyticsContext.Provider>
 )
 
-export const useApiClient = (): ApiClientContextValue => {
-  const context = useContext(ApiClientContext)
-  if (context === null) throw new Error('useApiClient must be used within ApiClientProvider')
+export const useAnalytics = (): AnalyticsClient => {
+  const context = useContext(AnalyticsContext)
+  if (context === null) throw new Error('useAnalytics must be used within AnalyticsProvider')
   return context
 }
 
@@ -394,7 +407,7 @@ at the integration boundary. Once the code moves inward, the rules apply normall
 | Hook naming | `camelCase` with `use` prefix | Missing prefix or `PascalCase` |
 | State | Centralize, use local state sparingly | Many scattered `useState` calls |
 | Context | Provider + usage hook, internal Context object | Expose raw Context to consumers |
-| Dependency injection | Inject via React Context | Import infrastructure directly |
+| Infrastructure | Keep outside React, wrap in a context only when absolutely needed | Import infrastructure directly |
 | `useEffect` | Sync with external systems only | Sync state with state |
 | Sub-components | Extract as proper components | Inline render functions |
 | Component complexity | Extract logic to plain functions | Heavy logic inline |
