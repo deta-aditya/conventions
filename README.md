@@ -1,8 +1,9 @@
 # Conventions
 
-Coding and architecture conventions for TypeScript and React codebases.
+Coding and architecture conventions for TypeScript codebases. The architecture is not tied
+to any framework. UI examples use React, and [react.md](src/react.md) covers React itself.
 
-Current version: **0.2.0**. See the [changelog](CHANGELOG.md) for what changed between
+Current version: **0.3.0**. See the [changelog](CHANGELOG.md) for what changed between
 versions.
 
 ---
@@ -17,7 +18,7 @@ Start with [Architecture](src/architecture.md), then read the rest as needed.
 | [Architecture: Repository](src/architecture-repository.md) | `apps/` and `packages/`, package categories, import rules, package exports, and the conventions version |
 | [Architecture: Unit](src/architecture-unit.md) | Units, operators, and extensions, the building blocks used in every layer |
 | [Architecture: Core](src/architecture-core.md) | Extensions, units, contracts, and use cases in the core |
-| [Architecture: React UI Shell](src/architecture-shell-ui.md) | Pages, page error boundaries, stores, commands, initialization, use case providers, and contract implementations |
+| [Architecture: UI Shell](src/architecture-shell-ui.md) | Pages, page error boundaries, stores, commands, initialization, use case providers, and contract implementations |
 | [Architecture: Server Shell](src/architecture-shell-server.md) | Configuration, initialization, routes, handlers, DTOs, error mapping, and authentication |
 | [Testing](src/testing.md) | Coverage targets, test structure, test data, mocking, and testing framework units |
 | [Naming](src/naming.md) | Casing, booleans, type parameters, discriminated union variants, use cases, contracts, and files |
@@ -43,7 +44,7 @@ The consumer and cron shell documents are planned but not written yet.
 | Extension | Operators added to a unit the current scope does not own |
 | Contract | A function type in the core describing external data the domain needs, implemented by the shell |
 | Use case | A function type the shell calls to perform an operation that needs the outside world |
-| Page error boundary | The mandatory React error boundary at the root of every page in a client app |
+| Page error boundary | The mandatory error boundary at the root of every page in a client app |
 
 ---
 

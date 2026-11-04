@@ -356,6 +356,9 @@ instead.
 fail with a meaningful error. `Promise<Option<T>>` or `Promise<Result<T, E>>` covers the
 async variants.
 
+Choosing between them is not strict. When in doubt, use `Result`. It always gives clearer
+data, since it says what went wrong instead of only that something is missing.
+
 Throwing is reserved for truly unexpected, unrecoverable situations.
 
 ---

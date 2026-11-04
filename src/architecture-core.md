@@ -125,6 +125,126 @@ via the deps type, making them composable. The shell wires the actual implementa
 
 ---
 
+## Transactions and consistency
+
+Sometimes several changes must happen together or not at all. For example, placing an order
+saves the order and reduces the stock. If only one of them is saved, the data is wrong.
+
+The core decides **what** must change together. The shell decides **how**, for example with
+a database transaction. Use these rules, in this order.
+
+### 1. One contract per change that must happen together
+
+This is the default. When several changes must happen together, make them one contract
+call. The use case builds everything that needs saving and hands it over in one go. The
+shell implementation saves it all inside one database transaction.
+
+```ts
+// --- Unit ---
+
+export type SavePlacedOrder = (request: SavePlacedOrderRequest) => Promise<Result<void, SaveError>>
+
+// SavePlacedOrderRequest = { order: Order; stock: Array<Stock> }
+```
+
+The core never sees the word "transaction". It only sees a contract that saves an order
+together with its stock.
+
+### 2. Concurrent changes: a version field
+
+Two requests may read the same data, change it, and save it at the same time. The second
+save would then silently overwrite the first. To prevent this, the unit carries a `version`
+number:
+
+- The shell saves a change only if the version is still the one that was read, and raises
+  the version when it does.
+- If someone else saved first, the contract returns `{ kind: 'conflict' }` as an error
+  value, not an exception.
+- The use case decides what a conflict means: read again and retry, or return the conflict
+  to the caller.
+
+```ts
+// --- Unit ---
+
+export type Stock = {
+  productId: ProductId
+  available: number
+  version: number
+}
+```
+
+```ts
+// Inside a use case: read again and retry on conflict, up to a limit
+for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  const found = await deps.findStockByProductId({ productId: request.productId })
+  if (found.isNone()) return Result.err({ kind: 'productNotFound' })
+
+  const reserved = reserve(found.value, request.quantity)
+  if (reserved.isErr()) return reserved
+
+  const saved = await deps.saveStock({ stock: reserved.value })
+  if (saved.isOk()) return Result.ok(reserved.value)
+}
+
+return Result.err({ kind: 'conflict' })
+```
+
+Retrying is safe because unit operators are pure. Running `reserve` again has no side
+effects to repeat. Transformers leave `version` as it is. Only the shell raises it.
+
+This also works when a change spans more than one request, such as a user editing a form
+for several minutes. The form sends back the version it loaded, so a save based on old data
+returns a conflict instead of overwriting someone else's change.
+
+### 3. A transaction contract, when the use case must control it
+
+Use this only when rules 1 and 2 are not enough, for example when a use case must read,
+decide, and write several things while nothing else changes them.
+
+A transaction contract is a function type like any other contract. It takes the work to do,
+and gives that work the contracts it may use inside the transaction.
+
+```ts
+// --- Unit ---
+
+export type RunInOrderTransaction = (work: OrderTransactionWork) => Promise<Result<void, OrderError>>
+```
+
+```ts
+// --- Unit ---
+
+export type OrderTransactionWork = (contracts: OrderTransactionContracts) => Promise<Result<void, OrderError>>
+
+// OrderTransactionContracts = { findStockByProductId: FindStockByProductId; saveOrder: SaveOrder; saveStock: SaveStock }
+```
+
+```ts
+// Inside a use case
+return deps.runInOrderTransaction(async ({ findStockByProductId, saveOrder, saveStock }) => {
+  // read, decide, and write with the contracts given here
+})
+```
+
+The shell implementation must roll the transaction back when the work returns an `Err`,
+not only when it throws. Expected errors are values, so most rollbacks come from an `Err`.
+
+### 4. Across modules: no shared transactions
+
+A module is where consistency stops, the same way it is where direct imports stop. One
+transaction never spans two modules.
+
+When two modules must both change, the first module saves its change and publishes an event.
+The event is saved in the same transaction as the change, so it is never lost. This is
+called the outbox pattern. The second module reacts to the event and makes its own change.
+
+### 5. Never use hidden transactions
+
+Do not open a transaction somewhere outside the use case, such as once per request in a
+middleware, and let contracts pick it up without being told. It is invisible in the code,
+hard to test, and keeps transactions open longer than needed.
+
+---
+
 ## Dependency direction
 
 From lowest to highest:
@@ -147,3 +267,4 @@ The shell depends on all of the above. Nothing in the core depends on the shell.
 | Units | Domain objects and their operators | Polyfill packages, extensions, `common`, lower units |
 | Contracts | Function types for fetching external data | Units |
 | Use cases | Entry points for shell operations | Units, contract types, other use case types |
+| Transactions | One contract per change that must happen together, a version field for concurrent changes, a transaction contract only when needed | Contracts |

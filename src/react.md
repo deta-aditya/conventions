@@ -44,7 +44,9 @@ synchronization problems between local and central state.
 
 Also prefer other state sources where appropriate. URL query parameters, routes, and
 local storage are valid state containers. Read from them directly instead of mirroring them
-into React state, to avoid synchronization issues.
+into React state, to avoid synchronization issues. Parse what you read into a unit before
+using it, since it comes from outside the app. See
+[Parse at the edge](./architecture.md#parse-at-the-edge).
 
 ```tsx
 // ✅ DO

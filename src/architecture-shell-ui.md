@@ -1,8 +1,21 @@
-# Architecture: React UI Shell
+# Architecture: UI Shell
 
-This document covers the structure and rules for the React UI Shell layer. The shell
+This document covers the structure and rules for the UI Shell layer. The shell
 orchestrates the core via use cases, implements contracts, and renders the UI. It
 contains no business logic.
+
+The UI shell is not tied to any UI framework. The examples use React, but every idea here,
+such as state, actions, commands, stores, use case providers, and containers, works in any
+UI framework, such as Vue, Svelte, or Solid. Use that framework's own tools for each idea:
+
+| Idea | In React | In other frameworks |
+|---|---|---|
+| Use case provider | React Context | The framework's way of passing values down, such as Vue `provide`/`inject` or Svelte context |
+| Page error boundary | An error boundary component | The framework's error catching, such as Vue `onErrorCaptured` or Svelte `<svelte:boundary>` |
+| Hooks | Hooks | The framework's reusable logic, such as Vue composables |
+
+Components, hooks, and the like follow the best practices of the framework in use. For
+React, see [react.md](./react.md).
 
 ---
 
@@ -11,12 +24,37 @@ contains no business logic.
 The UI shell is responsible for three things:
 
 1. Implementing contracts defined by the core
-2. Wiring contracts and use cases at initialization, outside React
+2. Wiring contracts and use cases at initialization, outside the UI framework
 3. Rendering UI and handling user interactions through the state-action-command model
 
 The shell may call core unit operators directly, including constructors and transformers.
 They are pure and immutable, so calling them has no side effects. Operations that need the
 outside world, such as fetching or saving data, go through use cases.
+
+---
+
+## Opinionated frameworks
+
+Some UI frameworks decide where files go and how the app is put together. For example,
+Next.js, Nuxt, and SvelteKit turn folders into routes, and some frameworks have no `main.tsx`
+for you to write. When you use such a framework, follow it. But keep the framework's files
+thin, so the architecture still holds:
+
+- Framework files only connect the framework to our code. They contain no logic. For
+  example, a Next.js `page.tsx` only renders the page from our module.
+- The core never changes for a framework. Use cases and contracts stay plain functions,
+  without framework imports.
+- When the framework does a job this document describes, let the framework do it. The rule
+  behind the job still applies:
+  - Routing by folders replaces `module-name-routes.ts`, and the framework's own code
+    splitting replaces lazy loading.
+  - A built-in error page per route, such as Next.js `error.tsx`, can be the page error
+    boundary. Every page still needs one.
+  - Without a `main.tsx`, contracts and use cases are still built once, in a single setup
+    file that the framework files import.
+
+The rest of this document describes the setup for frameworks that do not decide these
+things, including the directory structure.
 
 ---
 
@@ -249,7 +287,7 @@ The page error boundary must:
 
 It never swallows an error silently.
 
-React only supports error boundaries as class components. Use a library such as
+In React, error boundaries can only be class components. Use a library such as
 `react-error-boundary`, or keep a single shared class component at this edge, for example
 in `/common/components`.
 
@@ -356,8 +394,54 @@ export const createFindUserById = (deps: FindUserByIdDeps): FindUserById =>
   }
 ```
 
+This example returns an `Option`, which only says that no user came back. A `Result` would
+also say why, such as the user not existing or the network failing. Both are allowed, but a
+`Result` gives clearer data.
+
 Contract implementations are never imported inside components or hooks. They only reach
 use cases through initialization.
+
+---
+
+## Parse at the edge
+
+Every piece of data that enters the UI is parsed into a unit where it enters, including
+errors. See [architecture.md](./architecture.md#parse-at-the-edge) for the rule. In the UI
+shell, data enters here:
+
+| Data | Where it is parsed |
+|---|---|
+| API responses | In the contract implementation, before it returns |
+| API errors | In the contract implementation, into one of our error units |
+| Local storage, cookies, and other browser storage | In the contract implementation that reads it |
+| WebSocket messages and third-party SDK callbacks | In the contract implementation or effect that receives them |
+| URL, route, and query parameters | Where they are read, with a parse operator such as `parseOrderFilters` |
+| Form input | When the form is submitted, in the page reducer, with a schema unit |
+
+The contract implementation is the only place that knows what the backend sends. It turns
+both the success data and the errors into units:
+
+```ts
+// /contracts/verify-credentials/verify-credentials.http.ts
+
+export const createVerifyCredentials = (deps: VerifyCredentialsDeps): VerifyCredentials =>
+  async (request) => {
+    const response = await deps.apiClient.post('/sessions', request)
+
+    if (response.status === 401) return Result.err({ kind: 'invalidCredentials' })
+    if (!response.ok) return Result.err({ kind: 'unavailable' })
+
+    return parseUser(response.data)
+  }
+```
+
+From there, the error travels as a value. The use case returns it, the reducer stores the
+error unit in state, and only the presentational component decides what text to show and how
+to show it. Nothing turns the error into text before the component.
+
+Form input is parsed in the reducer, since parsing is pure. When the form is valid, the
+reducer issues a command with the parsed request. When it is not, it stores the parse errors
+in state for the form to show.
 
 ---
 
@@ -405,9 +489,9 @@ export const createAuthUseCases = (contracts: AuthContracts): AuthUseCases => ({
 
 ## Initialization
 
-Contracts and use cases are built once, at initialization in `main.tsx`, outside React.
-React code never constructs them, so infrastructure such as API clients does not leak into
-components or hooks.
+Contracts and use cases are built once, at initialization in `main.tsx`, outside the UI
+framework. Components and hooks never build them, so infrastructure such as API clients
+does not leak into them.
 
 Initialization is also where modules are wired together. When a use case in one module
 depends on a contract from another, it is passed in here.
@@ -432,7 +516,8 @@ createRoot(rootElement).render(
 ## Use case providers
 
 Each module has one use case provider. It receives the use cases already built at
-initialization and makes them available to React. It never builds anything itself. The
+initialization and makes them available to components and hooks. It never builds anything
+itself. The
 context object is internal and never exported directly. Consumers use the provided hook.
 
 ```tsx
@@ -464,8 +549,8 @@ In tests, pass use cases built from plain functions to the provider instead.
 Components are thin. They contain no business logic, no use case calls, and no direct data
 fetching. There are two kinds: presentational components and container components.
 
-Components, hooks, contexts, and stores are framework units. They follow
-[react.md](./react.md), not the unit rules. Styles live in a separate
+Components, hooks, contexts, and stores are framework units. They follow the UI
+framework's best practices, such as [react.md](./react.md) for React, not the unit rules. Styles live in a separate
 `component-name-styles.ts` file co-located with the component.
 
 ### Presentational components
@@ -555,9 +640,12 @@ exists only when it binds to a module-level store.
 
 | Rule | Description |
 |---|---|
+| Opinionated frameworks are followed thinly | Framework files only connect to our code, the core never changes |
+| Parse at the edge | All data, including errors, is parsed into units where it enters |
+| Errors stay values until the component | Only presentational components turn an error into text |
 | Unit operators can be called directly | Core operators are pure and immutable, so the shell may call them |
 | Outside world goes through use cases | Fetching or saving data always goes through a use case |
-| Contracts and use cases are built at initialization | Once per module in `main.tsx`, never inside React |
+| Contracts and use cases are built at initialization | Once per module in `main.tsx`, never inside components or hooks |
 | Reducer is a transformer | Lives in the state unit file, not in the store file |
 | Store exports are aliased | Destructure and alias createStore results for named exports |
 | Store is page-level by default | Module or app-level only when state is genuinely shared |
@@ -570,7 +658,8 @@ exists only when it binds to a module-level store.
 | Components are presentational by default | Props in, JSX out, at the narrowest scope that covers their users |
 | Containers select at the leaves | Page views are mostly layout, leaf containers select state |
 | One unit per file | Applies to page-level and module-level units equally |
-| Framework units follow React | Components, hooks, contexts, and stores follow [react.md](./react.md) |
+| UI framework agnostic | Any UI framework works, using its own tools for each idea |
+| Framework units follow the framework | Components, hooks, contexts, and stores follow the framework's best practices, such as [react.md](./react.md) |
 | Shell units may deviate | Purity and immutability can be relaxed when needed, kept contained |
 | Page error boundary | Mandatory, the outermost component of every page's `index.tsx` |
 | Testing | At least 70% coverage, mocking used sparingly, see [testing.md](./testing.md) |

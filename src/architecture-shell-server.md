@@ -158,7 +158,64 @@ export const createFindOrderById = (deps: FindOrderByIdDeps): FindOrderById =>
 ```
 
 Data coming back from the outside world is parsed into units before it is returned, never
-cast.
+cast. This includes errors. A failed query or an error from an external API is turned into
+one of our error units here.
+
+### Transactions
+
+The core decides what must change together. Contract implementations make it happen. See
+[Transactions and consistency](./architecture-core.md#transactions-and-consistency).
+
+- **A contract that saves several things** runs all its writes inside one database
+  transaction.
+- **A unit with a `version` field** is saved only if the version is unchanged, and the
+  version is raised in the same statement. When nothing was updated, return
+  `{ kind: 'conflict' }`.
+
+  ```ts
+  // /contracts/save-stock/save-stock.postgres.ts
+
+  export const createSaveStock = (deps: SaveStockDeps): SaveStock =>
+    async ({ stock }) => {
+      const updated = await deps.database.execute(
+        `UPDATE stock
+            SET available = $1, version = version + 1
+          WHERE product_id = $2 AND version = $3`,
+        [stock.available, stock.productId, stock.version],
+      )
+
+      if (updated.rowCount === 0) return Result.err({ kind: 'conflict' })
+      return Result.ok(undefined)
+    }
+  ```
+
+- **A transaction contract** opens a transaction, builds contracts bound to it, and runs the
+  work. It commits when the work returns `Ok`, and rolls back when the work returns `Err` or
+  throws. Many database libraries only roll back on a throw, so the `Err` case must be
+  handled on purpose.
+- **An event for another module** is saved in the same transaction as the change it
+  describes, in an outbox table. A separate process publishes it afterwards.
+
+Test these against a real database where practical. For example, save twice with the same
+version and check that the second save returns a conflict, or return an `Err` from the work
+and check that nothing was saved.
+
+---
+
+## Parse at the edge
+
+Every piece of data that enters the server is parsed into a unit where it enters, including
+errors. See [architecture.md](./architecture.md#parse-at-the-edge) for the rule. In the
+server shell, data enters here:
+
+| Data | Where it is parsed |
+|---|---|
+| Request bodies, query parameters, and path parameters | In the handler, with a DTO schema unit |
+| Headers, tokens, and cookies | In the authentication middleware |
+| Environment variables and config files | At startup, into the `Config` unit |
+| Database rows | In the contract implementation, before it returns |
+| External API responses and their errors | In the contract implementation, before it returns |
+| Third-party SDK return values and exceptions | In the contract implementation that calls the SDK |
 
 ---
 
@@ -385,8 +442,11 @@ coverage, with mocking used sparingly.
 | Opinionated frameworks are followed thinly | Framework files only connect to our code, the core never changes |
 | Unit operators can be called directly | Core operators are pure and immutable, so the shell may call them |
 | Outside world goes through use cases | Reading or writing data always goes through a use case |
+| Parse at the edge | All data, including errors, is parsed into units where it enters |
 | Configuration is parsed at startup | Into a `Config` unit, never read directly elsewhere |
 | Contracts and use cases are built at initialization | Once per module in `main.ts`, never per request |
+| Contract implementations make changes happen together | One database transaction per contract, a version check for concurrent changes |
+| Transaction contracts roll back on `Err` | Not only when the work throws |
 | Contract implementations name their tech | `{contract-name}.{tech}.ts`, such as `find-order-by-id.postgres.ts` |
 | Handlers are thin | Parse, call exactly one use case, map the result |
 | Input is parsed with DTOs | Every input is parsed before use, a failed parse is a `400` response |

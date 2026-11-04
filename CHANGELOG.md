@@ -5,6 +5,57 @@ the [README](README.md#versioning).
 
 ---
 
+## 0.3.0 - 2026-11-05
+
+### Changed (breaking)
+
+**Architecture**
+
+- Parse at the edge: every piece of data that enters the app, including errors, is parsed
+  into a unit where it enters. Inner code only gets units. The UI and server shells list
+  where data enters and where it is parsed.
+
+**Core**
+
+- Never use hidden transactions, such as one opened per request in a middleware and picked
+  up by contracts without being told.
+- One transaction never spans two modules. Modules use events and the outbox pattern
+  instead.
+
+**UI shell**
+
+- Errors stay values until a presentational component decides how to show them. Nothing
+  turns an error into text before that.
+- Form input is parsed in the page reducer when the form is submitted.
+
+### Added
+
+**Core**
+
+- Transactions and consistency: one contract per change that must happen together by
+  default, a `version` field with conflicts returned as error values for concurrent
+  changes, and a transaction contract only when the use case must control the transaction.
+
+**Units**
+
+- Choosing between `Option` and `Result` is not strict. Both are allowed, but `Result` is
+  preferred, since it says what went wrong.
+
+**UI shell**
+
+- The UI shell is not tied to React. Its ideas work in any UI framework, using that
+  framework's own tools, with a table mapping React tools to other frameworks. The doc is
+  renamed from "React UI Shell" to "UI Shell".
+- Opinionated frameworks: when a UI framework decides its own structure, such as Next.js,
+  follow it, but keep its files thin so the architecture still holds.
+
+**Server shell**
+
+- Transactions: how contract implementations run writes together, check versions, roll back
+  a transaction contract on `Err` as well as on a throw, and save outbox events.
+
+---
+
 ## 0.2.0 - 2026-11-02
 
 ### Changed (breaking)

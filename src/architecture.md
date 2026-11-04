@@ -123,7 +123,7 @@ structural conventions and concerns, and each is deployed as one or more apps.
 
 | Variant | Context |
 |---|---|
-| [UI Shell](./architecture-shell-ui.md) | React applications, browser |
+| [UI Shell](./architecture-shell-ui.md) | Client apps in any UI framework, such as React |
 | [Server Shell](./architecture-shell-server.md) | HTTP servers, REST or RPC APIs |
 | [Consumer Shell](./architecture-shell-consumer.md) | Message queue consumers |
 | [Cron Shell](./architecture-shell-cron.md) | Scheduled jobs |
@@ -131,6 +131,41 @@ structural conventions and concerns, and each is deployed as one or more apps.
 All shell variants share the same core principles. They implement contracts defined by the
 core, reach the outside world through use cases, keep orchestration thin with no
 business logic in the shell, and wire dependencies at the entry point.
+
+---
+
+## Parse at the edge
+
+Data from outside the app can be anything. A field can be missing, a type can be wrong, or
+an API can change its format without warning. So every piece of data is checked and turned
+into a unit at the exact point where it enters the app. This is called parsing.
+
+- **Parse where the data enters.** That point is always in the shell. Never pass raw data
+  further in.
+- **Inner code only gets units.** The core, and all code past the entry point, never sees
+  raw data.
+- **Parse, don't cast.** A cast such as `as User` only tells TypeScript to trust the data. It
+  checks nothing. See [typescript.md](./typescript.md#prefer-parsing-over-casting).
+- **A failed parse is an expected error.** It comes back as a `Result` or an `Option`, and
+  is handled like any other error. Both are allowed, but prefer `Result`. An `Option` only
+  says that something is missing, while a `Result` also says what went wrong.
+- **Errors count as data too.** When the outside world sends an error, such as an HTTP
+  status, a GraphQL error, or an exception from a third-party SDK, turn it into one of our
+  error units at the same point, such as `{ kind: 'invalidCredentials' }`. Inner code never
+  sees the outside world's error format.
+
+Data enters the app from many places:
+
+| Source | Examples |
+|---|---|
+| Requests and messages | HTTP request bodies, query parameters, headers, queue messages |
+| Responses | API responses, and the errors they return |
+| Storage | Database rows, local storage, cookies, files |
+| Environment | Environment variables, config files |
+| Users and the browser | Form input, URL and route parameters, browser APIs |
+| Third parties | SDK return values, callbacks, and exceptions |
+
+Each shell doc lists where data enters that shell, and where it is parsed.
 
 ---
 
